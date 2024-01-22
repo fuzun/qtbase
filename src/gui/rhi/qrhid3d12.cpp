@@ -3,6 +3,7 @@
 // Qt-Security score:significant reason:default
 
 #include "qrhid3d12_p.h"
+#include "D3D12MemAlloc.h"
 #include <qmath.h>
 #include <QtCore/private/qsystemerror_p.h>
 #include <QtCore/qcryptographichash.h>
@@ -158,6 +159,16 @@ QT_BEGIN_NAMESPACE
 
 // https://learn.microsoft.com/en-us/windows/win32/direct3d12/hardware-feature-levels
 static const D3D_FEATURE_LEVEL MIN_FEATURE_LEVEL = D3D_FEATURE_LEVEL_11_0;
+
+void QD3D12Resource::releaseResources()
+{
+    if (owns) {
+        // order matters: resource first, then the allocation
+        resource->Release();
+        if (allocation)
+            allocation->Release();
+    }
+}
 
 QRhiD3D12::QRhiD3D12(QRhiD3D12InitParams *params, QRhiD3D12NativeHandles *importParams)
 {
