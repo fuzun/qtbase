@@ -125,6 +125,8 @@ qt_internal_extend_target(QWindowsIntegrationPlugin CONDITION QT_FEATURE_clipboa
 qt_internal_extend_target(QWindowsIntegrationPlugin CONDITION QT_FEATURE_clipboard AND QT_FEATURE_draganddrop
     SOURCES
         qwindowsdrag.cpp qwindowsdrag.h
+    NO_PCH_SOURCES
+        qwindowsdrag.cpp
 )
 
 qt_internal_extend_target(QWindowsIntegrationPlugin CONDITION QT_FEATURE_tabletevent
