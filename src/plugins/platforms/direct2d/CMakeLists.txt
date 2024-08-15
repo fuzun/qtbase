@@ -79,7 +79,6 @@ qt_internal_add_plugin(QWindowsDirect2DIntegrationPlugin
         winspool
         wtsapi32
         comdlg32
-        d3d9
         mscms
 )
 
