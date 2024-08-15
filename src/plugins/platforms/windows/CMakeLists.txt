@@ -66,7 +66,6 @@ qt_internal_add_plugin(QWindowsIntegrationPlugin
         winspool
         wtsapi32
         comdlg32
-        d3d9
         mscms
 )
 
