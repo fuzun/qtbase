@@ -483,7 +483,8 @@ QPlatformFontDatabase *QWindowsIntegration::fontDatabase() const
         else
 #endif // QT_NO_FREETYPE
 #if QT_CONFIG(directwrite3)
-        if (!(d->m_options & (QWindowsIntegration::FontDatabaseGDI | QWindowsIntegration::DontUseDirectWriteFonts)))
+        if (QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10 &&
+            !(d->m_options & (QWindowsIntegration::FontDatabaseGDI | QWindowsIntegration::DontUseDirectWriteFonts)))
             d->m_fontDatabase = new QWindowsDirectWriteFontDatabase;
         else
 #endif
