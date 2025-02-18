@@ -63,7 +63,7 @@ public:
 
 protected:
     QEventDispatcherWin32(QEventDispatcherWin32Private &dd, QObject *parent = nullptr);
-    virtual void sendPostedEvents();
+    virtual void sendPostedEvents(qsizetype count = 0);
     void doUnregisterSocketNotifier(QSocketNotifier *notifier);
 
 private:
