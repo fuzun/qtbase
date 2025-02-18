@@ -1783,7 +1783,7 @@ void QCoreApplication::sendPostedEvents(QObject *receiver, int event_type)
 }
 
 void QCoreApplicationPrivate::sendPostedEvents(QObject *receiver, int event_type,
-                                               QThreadData *data)
+                                               QThreadData *data, qsizetype count)
 {
     if (event_type == -1) {
         // we were called by an obsolete event dispatcher.
@@ -1855,7 +1855,13 @@ void QCoreApplicationPrivate::sendPostedEvents(QObject *receiver, int event_type
     };
     CleanUp cleanup(receiver, event_type, data);
 
-    while (i < data->postEventList.size()) {
+    qsizetype amount;
+    if (count <= 0) // if 0, process all events, which is the default behavior
+        amount = data->postEventList.size();
+    else
+        amount = std::min<qsizetype>(i + count, data->postEventList.size());
+
+    while (i < amount) {
         // avoid live-lock
         if (i >= data->postEventList.insertionOffset)
             break;
