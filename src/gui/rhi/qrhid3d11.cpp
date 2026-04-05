@@ -8,6 +8,7 @@
 #include <QWindow>
 #include <qmath.h>
 #include <QtCore/qcryptographichash.h>
+#include <QtCore/qoperatingsystemversion.h>
 #include <QtCore/private/qsystemerror_p.h>
 #include <QtCore/private/qsystemlibrary_p.h>
 #include "qrhid3dhelpers_p.h"
@@ -5487,7 +5488,9 @@ bool QD3D11SwapChain::createOrResize()
         desc.BufferCount = BUFFER_COUNT;
         desc.Flags = swapChainFlags;
         desc.Scaling = rhiD->useLegacySwapchainModel ? DXGI_SCALING_STRETCH : DXGI_SCALING_NONE;
-        desc.SwapEffect = rhiD->useLegacySwapchainModel ? DXGI_SWAP_EFFECT_DISCARD : DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        desc.SwapEffect = rhiD->useLegacySwapchainModel ? DXGI_SWAP_EFFECT_DISCARD
+                                                        : ((QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10) ? DXGI_SWAP_EFFECT_FLIP_DISCARD
+                                                                                                                                      : DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL);
         desc.Stereo = stereo;
 
         if (dcompVisual) {
