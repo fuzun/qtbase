@@ -227,7 +227,7 @@ bool QRhiD3D11::create(QRhi::Flags flags)
     // Support for flip model swapchains is required now (since we are
     // targeting Windows 10+), but the option for using the old model is still
     // there. (some features are not supported then, however)
-    useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP");
+    useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP") || (QOperatingSystemVersion::current() < QOperatingSystemVersion::Windows8);
 
     if (!useLegacySwapchainModel) {
         if (qEnvironmentVariableIsSet("QT_D3D_MAX_FRAME_LATENCY"))
