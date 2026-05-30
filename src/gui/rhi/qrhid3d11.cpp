@@ -364,12 +364,12 @@ bool QRhiD3D11::create(QRhi::Flags flags)
             // still not support this D3D_FEATURE_LEVEL_11_1 feature. (e.g.
             // because it only does 11_0)
             if (!features.ConstantBufferOffsetting) {
+                doNotUseConstantBufferOffsetting = true;
                 static const char *msg = "D3D11 smoke test: Constant buffer offsetting is not supported by the driver";
                 if (flags.testFlag(QRhi::SuppressSmokeTestWarnings))
                     qCDebug(QRHI_LOG_INFO, "%s", msg);
                 else
                     qWarning("%s", msg);
-                return false;
             }
         } else {
             static const char *msg = "D3D11 smoke test: Failed to query D3D11_FEATURE_D3D11_OPTIONS";
@@ -434,6 +434,10 @@ void QRhiD3D11::destroy()
     finishActiveReadbacks();
 
     clearShaderCache();
+
+    for (auto it = cbufOffsetScratch.cbegin(), end = cbufOffsetScratch.cend(); it != end; ++it)
+        it.value()->Release();
+    cbufOffsetScratch.clear();
 
     if (ofr.tsDisjointQuery) {
         ofr.tsDisjointQuery->Release();
@@ -2779,9 +2783,57 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
     return countSlots;
 }
 
-#define SETUBUFBATCH(stagePrefixL, stagePrefixU) \
+template<typename SetConstantBuffersFn>
+static void bindUniformBuffersEmulated(ID3D11DeviceContext1 *context,
+                                       QRhiD3D11 *rhiD,
+                                       uint stageIndex,
+                                       const QD3D11ShaderResourceBindings::StageUniformBufferBatches &batches,
+                                       const uint *dynOfsPairs, int dynOfsPairCount,
+                                       const char *stageTag,
+                                       SetConstantBuffersFn setConstantBuffers)
+{
+    for (int i = 0, ie = batches.ubufs.batches.count(); i != ie; ++i) {
+        const auto &bufBatch = batches.ubufs.batches[i];
+        const uint count = clampedResourceCount(bufBatch.startBinding, bufBatch.resources.count(),
+                                                D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, stageTag);
+        for (uint b = 0; b < count; ++b) {
+            ID3D11Buffer *srcBuf = bufBatch.resources[int(b)];
+            const uint slot = uint(bufBatch.startBinding) + b;
+            uint offsetInConstants = batches.ubufoffsets.batches[i].resources[int(b)];
+            const uint sizeInConstants = batches.ubufsizes.batches[i].resources[int(b)];
+
+            if (dynOfsPairCount) {
+                const uint origBinding = batches.ubuforigbindings.batches[i].resources[int(b)];
+                for (int di = 0; di < dynOfsPairCount; ++di) {
+                    if (dynOfsPairs[2 * di] == origBinding) {
+                        offsetInConstants = dynOfsPairs[2 * di + 1];
+                        break;
+                    }
+                }
+            }
+
+            ID3D11Buffer *boundBuf = srcBuf;
+            if (offsetInConstants != 0) {
+                ID3D11Buffer *scratch = rhiD->emulatedOffsetScratchBuffer(stageIndex, slot);
+                if (scratch) {
+                    D3D11_BOX box;
+                    box.left = offsetInConstants * 16u;
+                    box.right = box.left + sizeInConstants * 16u;
+                    box.top = box.front = 0;
+                    box.bottom = box.back = 1;
+                    context->CopySubresourceRegion(scratch, 0, 0, 0, 0, srcBuf, 0, &box);
+                    boundBuf = scratch;
+                }
+            }
+            setConstantBuffers(UINT(slot), 1, &boundBuf);
+        }
+    }
+}
+
+#define SETUBUFBATCH(stagePrefixL, stagePrefixU, stageIdx) \
     if (allResourceBatches.stagePrefixL##UniformBufferBatches.present) { \
         const QD3D11ShaderResourceBindings::StageUniformBufferBatches &batches(allResourceBatches.stagePrefixL##UniformBufferBatches); \
+        if (!doNotUseConstantBufferOffsetting) { \
         for (int i = 0, ie = batches.ubufs.batches.count(); i != ie; ++i) { \
             const uint count = clampedResourceCount(batches.ubufs.batches[i].startBinding, \
                                                     batches.ubufs.batches[i].resources.count(), \
@@ -2805,6 +2857,12 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
                                                    batches.ubufsizes.batches[i].resources.constData()); \
                 } \
             } \
+        } } else { \
+            bindUniformBuffersEmulated(context, this, stageIdx, batches, dynOfsPairs, dynOfsPairCount, \
+                #stagePrefixU " cbuf (emulated)", \
+                [context = context](UINT slot, UINT count, ID3D11Buffer *const *bufs) { \
+                    context->stagePrefixU##SetConstantBuffers(slot, count, bufs); \
+            }); \
         } \
     }
 
@@ -2851,12 +2909,12 @@ void QRhiD3D11::bindShaderResources(QD3D11CommandBuffer *cbD,
 {
     UINT offsets[QD3D11CommandBuffer::MAX_DYNAMIC_OFFSET_COUNT];
 
-    SETUBUFBATCH(vs, VS)
-    SETUBUFBATCH(hs, HS)
-    SETUBUFBATCH(ds, DS)
-    SETUBUFBATCH(gs, GS)
-    SETUBUFBATCH(fs, PS)
-    SETUBUFBATCH(cs, CS)
+    SETUBUFBATCH(vs, VS, RBM_VERTEX)
+    SETUBUFBATCH(hs, HS, RBM_HULL)
+    SETUBUFBATCH(ds, DS, RBM_DOMAIN)
+    SETUBUFBATCH(gs, GS, RBM_GEOMETRY)
+    SETUBUFBATCH(fs, PS, RBM_FRAGMENT)
+    SETUBUFBATCH(cs, CS, RBM_COMPUTE)
 
     if (!offsetOnlyChange) {
         SETSAMPLERBATCH(vs, VS)
@@ -5357,6 +5415,29 @@ bool QD3D11SwapChain::newColorBuffer(const QSize &size, DXGI_FORMAT format, DXGI
     }
 
     return true;
+}
+
+ID3D11Buffer *QRhiD3D11::emulatedOffsetScratchBuffer(uint stageIndex, uint slot)
+{
+    const quint32 key = (stageIndex << 16) | slot;
+    auto it = cbufOffsetScratch.constFind(key);
+    if (it != cbufOffsetScratch.cend())
+        return it.value();
+
+    D3D11_BUFFER_DESC desc = {};
+    desc.ByteWidth = 65536; // largest a CB can ever be (D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16)
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+    ID3D11Buffer *buf = nullptr;
+    HRESULT hr = dev->CreateBuffer(&desc, nullptr, &buf);
+    if (FAILED(hr)) {
+        qWarning("Failed to create cbuf-offsetting emulation scratch buffer: %s",
+                 qPrintable(QSystemError::windowsComString(hr)));
+        return nullptr;
+    }
+    cbufOffsetScratch.insert(key, buf);
+    return buf;
 }
 
 bool QRhiD3D11::ensureDirectCompositionDevice()
