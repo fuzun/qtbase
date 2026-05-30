@@ -815,6 +815,8 @@ public:
     void drawIndexedIndirect(QRhiCommandBuffer *cb, QRhiBuffer *indirectBuffer,
                              quint32 indirectBufferOffset, quint32 drawCount, quint32 stride) override;
 
+    ID3D11Buffer * emulatedOffsetScratchBuffer(uint stageIndex, uint slot);
+
     void debugMarkBegin(QRhiCommandBuffer *cb, const QByteArray &name) override;
     void debugMarkEnd(QRhiCommandBuffer *cb) override;
     void debugMarkMsg(QRhiCommandBuffer *cb, const QByteArray &msg) override;
@@ -888,9 +890,12 @@ public:
     IDCompositionDevice *dcompDevice = nullptr;
     bool supportsAllowTearing = false;
     bool useLegacySwapchainModel = false;
+    bool doNotUseConstantBufferOffsetting = false;
     bool deviceLost = false;
     QRhiD3D11NativeHandles nativeHandlesStruct;
     QRhiDriverInfo driverInfoStruct;
+
+    QHash<quint32, ID3D11Buffer *> cbufOffsetScratch;
 
     struct {
         int vsHighestActiveVertexBufferBinding = -1;
