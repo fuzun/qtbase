@@ -364,12 +364,12 @@ bool QRhiD3D11::create(QRhi::Flags flags)
             // still not support this D3D_FEATURE_LEVEL_11_1 feature. (e.g.
             // because it only does 11_0)
             if (!features.ConstantBufferOffsetting) {
+                doNotUseConstantBufferOffsetting = true;
                 static const char *msg = "D3D11 smoke test: Constant buffer offsetting is not supported by the driver";
                 if (flags.testFlag(QRhi::SuppressSmokeTestWarnings))
                     qCDebug(QRHI_LOG_INFO, "%s", msg);
                 else
                     qWarning("%s", msg);
-                return false;
             }
         } else {
             static const char *msg = "D3D11 smoke test: Failed to query D3D11_FEATURE_D3D11_OPTIONS";
@@ -1067,6 +1067,8 @@ void QRhiD3D11::setShaderResources(QRhiCommandBuffer *cb, QRhiShaderResourceBind
             // NonDynamicUniformBuffers is not supported by this backend
             Q_ASSERT(bufD->m_type == QRhiBuffer::Dynamic && bufD->m_usage.testFlag(QRhiBuffer::UniformBuffer));
             sanityCheckResourceOwnership(bufD);
+
+            Q_ASSERT(!doNotUseConstantBufferOffsetting || (b->u.ubuf.offset == 0 && !b->u.ubuf.hasDynamicOffset));
 
             executeBufferHostWrites(bufD);
 
@@ -2502,6 +2504,9 @@ void QRhiD3D11::updateShaderResourceBindings(QD3D11ShaderResourceBindings *srbD,
         {
             QD3D11Buffer *bufD = QRHI_RES(QD3D11Buffer, b->u.ubuf.buf);
             Q_ASSERT(aligned(b->u.ubuf.offset, 256u) == b->u.ubuf.offset);
+
+            Q_ASSERT(!doNotUseConstantBufferOffsetting || (b->u.ubuf.offset == 0 && !b->u.ubuf.hasDynamicOffset));
+
             bd.ubuf.id = bufD->m_id;
             bd.ubuf.generation = bufD->generation;
             // Dynamic ubuf offsets are not considered here, those are baked in
@@ -2788,6 +2793,7 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
                                                     D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, \
                                                     #stagePrefixU " cbuf"); \
             if (count) { \
+                if (!doNotUseConstantBufferOffsetting) { \
                 if (!dynOfsPairCount) { \
                     context->stagePrefixU##SetConstantBuffers1(batches.ubufs.batches[i].startBinding, \
                                                    count, \
@@ -2803,6 +2809,12 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
                                                    batches.ubufs.batches[i].resources.constData(), \
                                                    offsets, \
                                                    batches.ubufsizes.batches[i].resources.constData()); \
+                } \
+                } else { \
+                    Q_ASSERT(dynOfsPairCount == 0); \
+                    context->stagePrefixU##SetConstantBuffers(batches.ubufs.batches[i].startBinding, \
+                                                              count, \
+                                                              batches.ubufs.batches[i].resources.constData()); \
                 } \
             } \
         } \
