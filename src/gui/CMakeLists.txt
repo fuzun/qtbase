@@ -500,7 +500,6 @@ qt_internal_extend_target(Gui CONDITION WIN32
         d3d11
         dxgi
         dxguid
-        d3d12
     NO_UNITY_BUILD_SOURCES
         rhi/qrhid3d11.cpp rhi/qrhid3d12.cpp # duplicate aligned() etc
         text/windows/qwindowsfontdatabasebase.cpp # duplicate struct OS2Table

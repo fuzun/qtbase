@@ -187,10 +187,10 @@ void QDxgiVSyncService::refAdapter(LUID luid)
         return;
 
     if (!dxgiFactory) {
-        HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
+        HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
         if (FAILED(hr)) {
             disableService = true;
-            qWarning("QDxgiVSyncService: CreateDXGIFactory2 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
+            qWarning("QDxgiVSyncService: CreateDXGIFactory1 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
             return;
         }
         if (!cleanupRegistered) {

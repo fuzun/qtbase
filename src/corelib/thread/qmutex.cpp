@@ -847,7 +847,7 @@ void QBasicMutex::unlockInternal(void *copy) noexcept
     Q_ASSERT(copy); //we must be locked
     Q_ASSERT(copy != dummyLocked()); // testAndSetRelease(dummyLocked(), 0) failed
 
-#  if defined(Q_OS_FREEBSD) || defined(Q_OS_LINUX) || defined(Q_OS_WIN)
+#  if defined(Q_OS_FREEBSD) || defined(Q_OS_LINUX)
     // these platforms always have futex and have never called this function
     // from inline code
     Q_UNREACHABLE();
@@ -950,6 +950,8 @@ QT_END_NAMESPACE
 
 #if defined(QT_ALWAYS_USE_FUTEX)
 // nothing
+#elif defined(Q_OS_WIN)
+#  include "qmutex_win.cpp"
 #else
 #  include "qmutex_unix.cpp"
 #endif

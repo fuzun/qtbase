@@ -8,6 +8,7 @@
 #include "qcoreapplication.h"
 #include <private/qcoreapplication_p.h>
 #include <private/qeventdispatcher_win_p.h>
+#include <private/qsystemlibrary_p.h>
 #include "qloggingcategory.h"
 #include "qmutex.h"
 #include <private/quniquehandle_types_p.h>
@@ -19,17 +20,6 @@
 #  define _MT
 #endif // _MT
 #include <process.h>
-
-extern "C" {
-// MinGW is missing the declaration of SetThreadDescription:
-WINBASEAPI
-HRESULT
-WINAPI
-SetThreadDescription(
-    _In_ HANDLE hThread,
-    _In_ PCWSTR lpThreadDescription
-    );
-}
 
 #ifndef THREAD_POWER_THROTTLING_EXECUTION_SPEED
 #define THREAD_POWER_THROTTLING_EXECUTION_SPEED 0x1
@@ -183,7 +173,17 @@ unsigned int __stdcall QT_ENSURE_STACK_ALIGNED_FOR_SSE QThreadPrivate::start(voi
     if (Q_LIKELY(threadName.isEmpty()))
         threadName = QString::fromUtf8(thr->metaObject()->className());
 #ifndef QT_WIN_SERVER_2016_COMPAT
-    SetThreadDescription(GetCurrentThread(), reinterpret_cast<const wchar_t *>(threadName.utf16()));
+    {
+        typedef HRESULT (WINAPI *SetThreadDescriptionFunc)(HANDLE, PCWSTR);
+
+        static SetThreadDescriptionFunc setThreadDescription = []() {
+            QSystemLibrary kernel32(QLatin1String("kernel32"));
+            return (SetThreadDescriptionFunc)(kernel32.resolve("SetThreadDescription"));
+        }();
+
+        if (setThreadDescription)
+            setThreadDescription(GetCurrentThread(), reinterpret_cast<const wchar_t *>(threadName.utf16()));
+    }
 #else
     HMODULE kernelbase = GetModuleHandleW(L"kernelbase.dll");
     if (kernelbase != NULL) {
@@ -232,7 +232,14 @@ void QThreadPrivate::setQualityOfServiceLevel(QThread::QualityOfService qosLevel
         state.StateMask = 0; // Ask to disable throttling
         break;
     }
-    if (!SetThreadInformation(::GetCurrentThread(), THREAD_INFORMATION_CLASS::ThreadPowerThrottling,
+
+    typedef BOOL (WINAPI *SetThreadInformationFunc)(HANDLE, THREAD_INFORMATION_CLASS, LPVOID, DWORD);
+    static SetThreadInformationFunc setThreadInformation = []() {
+        QSystemLibrary kernel32dll(QLatin1String("kernel32"));
+        return (SetThreadInformationFunc)(kernel32dll.resolve("SetThreadInformation"));
+    }();
+
+    if (setThreadInformation && !setThreadInformation(::GetCurrentThread(), THREAD_INFORMATION_CLASS::ThreadPowerThrottling,
                               &state, sizeof(state))) {
         qErrnoWarning("Failed to set thread power throttling state");
     }

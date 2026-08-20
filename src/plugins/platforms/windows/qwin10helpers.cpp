@@ -5,6 +5,7 @@
 #include "qwin10helpers.h"
 
 #include <QtCore/qdebug.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 #include <winstring.h>
 #include <roapi.h>
 
@@ -70,14 +71,33 @@ bool qt_windowsIsTabletMode(HWND hwnd)
     HSTRING_HEADER uiViewSettingsIdRefHeader;
     HSTRING uiViewSettingsIdHs = nullptr;
     const auto uiViewSettingsIdLen = UINT32(sizeof(uiViewSettingsId) / sizeof(uiViewSettingsId[0]) - 1);
-    if (FAILED(WindowsCreateStringReference(uiViewSettingsId, uiViewSettingsIdLen, &uiViewSettingsIdRefHeader, &uiViewSettingsIdHs)))
+
+    typedef HRESULT (WINAPI *WindowsCreateStringReferenceCompat)(PCWSTR, UINT32, HSTRING_HEADER*, HSTRING*);
+    static WindowsCreateStringReferenceCompat windowsCreateStringReference = []() {
+        QSystemLibrary winrtstringapisetdll(QLatin1String("api-ms-win-core-winrt-string-l1-1-0"));
+        return (WindowsCreateStringReferenceCompat)(winrtstringapisetdll.resolve("WindowsCreateStringReference"));
+    }();
+
+    if (!windowsCreateStringReference)
+        return false;
+
+    if (FAILED(windowsCreateStringReference(uiViewSettingsId, uiViewSettingsIdLen, &uiViewSettingsIdRefHeader, &uiViewSettingsIdHs)))
         return false;
 
     IUIViewSettingsInterop *uiViewSettingsInterop = nullptr;
     // __uuidof(IUIViewSettingsInterop);
     const GUID uiViewSettingsInteropRefId = {0x3694dbf9, 0x8f68, 0x44be,{0x8f, 0xf5, 0x19, 0x5c, 0x98, 0xed, 0xe8, 0xa6}};
 
-    HRESULT hr = RoGetActivationFactory(uiViewSettingsIdHs, uiViewSettingsInteropRefId,
+    typedef HRESULT (WINAPI *RoGetActivationFactoryCompat)(HSTRING, REFIID, void **);
+    static RoGetActivationFactoryCompat roGetActivationFactory = []() {
+        QSystemLibrary combasedll(QLatin1String("combase"));
+        return (RoGetActivationFactoryCompat)(combasedll.resolve("RoGetActivationFactory"));
+    }();
+
+    if (!roGetActivationFactory)
+        return false;
+
+    HRESULT hr = roGetActivationFactory(uiViewSettingsIdHs, uiViewSettingsInteropRefId,
                                                    reinterpret_cast<void **>(&uiViewSettingsInterop));
     if (FAILED(hr))
         return false;
