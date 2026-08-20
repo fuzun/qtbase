@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 // Qt-Security score:significant reason:default
 
+# if !defined(WINVER) || (WINVER < 0x0602)
+#  undef WINVER
+#  define WINVER 0x0602
+# endif
+
 #include <QtCore/qt_windows.h>
 #include "qwindowsdrag.h"
 #include "qwindowscontext.h"
@@ -671,11 +676,14 @@ static HRESULT startDoDragDrop(LPDATAOBJECT pDataObj, LPDROPSOURCE pDropSource, 
             }
 
             if (msg.message == WM_POINTERUPDATE) {
+                if (!QWindowsContext::user32dll.getPointerInfo)
+                    return E_FAIL;
 
                 const quint32 pointerId = GET_POINTERID_WPARAM(msg.wParam);
 
                 POINTER_INFO pointerInfo{};
-                if (!GetPointerInfo(pointerId, &pointerInfo))
+
+                if (!QWindowsContext::user32dll.getPointerInfo(pointerId, &pointerInfo))
                     return E_FAIL;
 
                 if (pointerInfo.pointerFlags & POINTER_FLAG_PRIMARY) {
