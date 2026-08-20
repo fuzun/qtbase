@@ -5,6 +5,7 @@
 #include "qfunctions_win_p.h"
 
 #include <QtCore/qdebug.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 
 #include <combaseapi.h>
 #include <objbase.h>
@@ -63,7 +64,17 @@ bool qt_win_hasPackageIdentity()
 #if defined(HAS_APPMODEL)
     static const bool hasPackageIdentity = []() {
         UINT32 length = 0;
-        switch (const auto result = GetCurrentPackageFullName(&length, nullptr)) {
+
+        typedef LONG (*GetCurrentPackageFullNameCompat)(UINT32*, PWSTR);
+        static GetCurrentPackageFullNameCompat getCurrentPackageFullName = []() {
+            QSystemLibrary kernel32dll(QLatin1String("kernel32"));
+            return (GetCurrentPackageFullNameCompat)(kernel32dll.resolve("GetCurrentPackageFullName"));
+        }();
+
+        if (!getCurrentPackageFullName)
+            return false;
+
+        switch (const auto result = getCurrentPackageFullName(&length, nullptr)) {
         case ERROR_INSUFFICIENT_BUFFER:
             return true;
         case APPMODEL_ERROR_NO_PACKAGE:
