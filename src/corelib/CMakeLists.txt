@@ -793,6 +793,8 @@ qt_internal_extend_target(Core CONDITION QT_FEATURE_liburing
 qt_internal_extend_target(Core CONDITION QT_FEATURE_windows_ioring
     SOURCES
         io/qioring.cpp io/qioring_win.cpp io/qioring_p.h
+    NO_PCH_SOURCES
+        io/qioring_win.cpp
 )
 
 # Workaround for QTBUG-101411
