@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 // Qt-Security score:critical reason:data-parser
 
+#if !defined(_WIN32_WINNT) || (_WIN32_WINNT < 0x0602)
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602 // Windows 8, to access FILE_ID_INFO
+#endif
+
 #include "qfilesystemengine_p.h"
 #include "qoperatingsystemversion.h"
 #include "qplatformdefs.h"

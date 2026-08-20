@@ -15,6 +15,7 @@
 #include "qelapsedtimer.h"
 #include "qcoreapplication_p.h"
 #include <private/qthread_p.h>
+#include <private/qsystemlibrary_p.h>
 
 #include "q26numeric.h"
 
@@ -371,7 +372,15 @@ void QEventDispatcherWin32Private::registerTimer(WinTimerInfo *t)
 
     if (!ok) {
         // user normal timers for (Very)CoarseTimers, or if no more multimedia timers available
-        ok = SetCoalescableTimer(internalHwnd, t->timerId, interval, nullptr, tolerance);
+
+        typedef UINT_PTR (WINAPI *SetCoalescableTimerCompat)(HWND, UINT_PTR, UINT, TIMERPROC, ULONG);
+        static SetCoalescableTimerCompat setCoalescableTimer = []() {
+            QSystemLibrary user32dll(QLatin1String("user32"));
+            return (SetCoalescableTimerCompat)(user32dll.resolve("SetCoalescableTimer"));
+        }();
+
+        if (setCoalescableTimer)
+            ok = setCoalescableTimer(internalHwnd, t->timerId, interval, nullptr, tolerance);
     }
     if (!ok)
         ok = SetTimer(internalHwnd, t->timerId, interval, nullptr);
