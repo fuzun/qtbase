@@ -9,6 +9,7 @@
 #include <qmath.h>
 #include <QtCore/qcryptographichash.h>
 #include <QtCore/private/qsystemerror_p.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 #include "qrhid3dhelpers_p.h"
 
 #include <cstdio>
@@ -186,9 +187,9 @@ inline Int aligned(Int v, Int byteAlign)
 static IDXGIFactory1 *createDXGIFactory2()
 {
     IDXGIFactory1 *result = nullptr;
-    const HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&result));
+    const HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&result));
     if (FAILED(hr)) {
-        qWarning("CreateDXGIFactory2() failed to create DXGI factory: %s",
+        qWarning("CreateDXGIFactory1() failed to create DXGI factory: %s",
             qPrintable(QSystemError::windowsComString(hr)));
         result = nullptr;
     }
