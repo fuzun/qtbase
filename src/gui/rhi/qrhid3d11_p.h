@@ -888,6 +888,7 @@ public:
     IDCompositionDevice *dcompDevice = nullptr;
     bool supportsAllowTearing = false;
     bool useLegacySwapchainModel = false;
+    bool doNotUseConstantBufferOffsetting = false;
     bool deviceLost = false;
     QRhiD3D11NativeHandles nativeHandlesStruct;
     QRhiDriverInfo driverInfoStruct;

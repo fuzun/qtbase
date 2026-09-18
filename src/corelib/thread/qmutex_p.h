@@ -84,6 +84,8 @@ public:
     //platform specific stuff
 #if defined(Q_OS_UNIX)
     sem_t semaphore;
+#elif defined(Q_OS_WIN)
+    Qt::HANDLE event;
 #endif
 };
 

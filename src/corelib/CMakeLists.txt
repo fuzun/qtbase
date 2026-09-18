@@ -628,16 +628,17 @@ if(QT_FEATURE_async_io)
     )
 endif()
 
-# This needs to be done before one below adds kernel32 because the symbols we use
-# from synchronization also appears in kernel32 in the version of MinGW we use in CI.
-# However, when picking the symbols from libkernel32.a it will try to load the symbols
-# from the wrong DLL at runtime and crash!
+# Do not link `synchronization`, because
+# MinGW redirects it to api-ms-win-core-synch-l1-2-0.a
+# Which seems to be available on Windows 7 (for some reason)
+# but is broken.  Use the symbols from kernel32 instead.
 qt_internal_extend_target(Core CONDITION QT_FEATURE_thread AND WIN32
     SOURCES
         thread/qfutex_win_p.h
+        thread/qmutex_win.cpp
         thread/qwaitcondition_win.cpp
-    LIBRARIES
-        synchronization
+    # LIBRARIES
+    #     synchronization
 )
 
 qt_internal_extend_target(Core CONDITION CYGWIN
@@ -792,6 +793,8 @@ qt_internal_extend_target(Core CONDITION QT_FEATURE_liburing
 qt_internal_extend_target(Core CONDITION QT_FEATURE_windows_ioring
     SOURCES
         io/qioring.cpp io/qioring_win.cpp io/qioring_p.h
+    NO_PCH_SOURCES
+        io/qioring_win.cpp
 )
 
 # Workaround for QTBUG-101411
@@ -1633,6 +1636,7 @@ qt_internal_extend_target(Core CONDITION QT_FEATURE_ctf
 # This file is included by qmutex.cpp
 set_source_files_properties(
     thread/qmutex_unix.cpp
+    thread/qmutex_win.cpp
     PROPERTIES HEADER_FILE_ONLY ON)
 
 # Remove QT_NO_CAST_TO_ASCII to ensure that the symbols are included in the library.

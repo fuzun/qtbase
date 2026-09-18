@@ -8,7 +8,9 @@
 #include <QWindow>
 #include <qmath.h>
 #include <QtCore/qcryptographichash.h>
+#include <QtCore/qoperatingsystemversion.h>
 #include <QtCore/private/qsystemerror_p.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 #include "qrhid3dhelpers_p.h"
 
 #include <cstdio>
@@ -186,9 +188,9 @@ inline Int aligned(Int v, Int byteAlign)
 static IDXGIFactory1 *createDXGIFactory2()
 {
     IDXGIFactory1 *result = nullptr;
-    const HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&result));
+    const HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&result));
     if (FAILED(hr)) {
-        qWarning("CreateDXGIFactory2() failed to create DXGI factory: %s",
+        qWarning("CreateDXGIFactory1() failed to create DXGI factory: %s",
             qPrintable(QSystemError::windowsComString(hr)));
         result = nullptr;
     }
@@ -225,7 +227,7 @@ bool QRhiD3D11::create(QRhi::Flags flags)
     // Support for flip model swapchains is required now (since we are
     // targeting Windows 10+), but the option for using the old model is still
     // there. (some features are not supported then, however)
-    useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP");
+    useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP") || (QOperatingSystemVersion::current() < QOperatingSystemVersion::Windows8);
 
     if (!useLegacySwapchainModel) {
         if (qEnvironmentVariableIsSet("QT_D3D_MAX_FRAME_LATENCY"))
@@ -362,12 +364,12 @@ bool QRhiD3D11::create(QRhi::Flags flags)
             // still not support this D3D_FEATURE_LEVEL_11_1 feature. (e.g.
             // because it only does 11_0)
             if (!features.ConstantBufferOffsetting) {
+                doNotUseConstantBufferOffsetting = true;
                 static const char *msg = "D3D11 smoke test: Constant buffer offsetting is not supported by the driver";
                 if (flags.testFlag(QRhi::SuppressSmokeTestWarnings))
                     qCDebug(QRHI_LOG_INFO, "%s", msg);
                 else
                     qWarning("%s", msg);
-                return false;
             }
         } else {
             static const char *msg = "D3D11 smoke test: Failed to query D3D11_FEATURE_D3D11_OPTIONS";
@@ -1065,6 +1067,8 @@ void QRhiD3D11::setShaderResources(QRhiCommandBuffer *cb, QRhiShaderResourceBind
             // NonDynamicUniformBuffers is not supported by this backend
             Q_ASSERT(bufD->m_type == QRhiBuffer::Dynamic && bufD->m_usage.testFlag(QRhiBuffer::UniformBuffer));
             sanityCheckResourceOwnership(bufD);
+
+            Q_ASSERT(!doNotUseConstantBufferOffsetting || (b->u.ubuf.offset == 0 && !b->u.ubuf.hasDynamicOffset));
 
             executeBufferHostWrites(bufD);
 
@@ -2500,6 +2504,9 @@ void QRhiD3D11::updateShaderResourceBindings(QD3D11ShaderResourceBindings *srbD,
         {
             QD3D11Buffer *bufD = QRHI_RES(QD3D11Buffer, b->u.ubuf.buf);
             Q_ASSERT(aligned(b->u.ubuf.offset, 256u) == b->u.ubuf.offset);
+
+            Q_ASSERT(!doNotUseConstantBufferOffsetting || (b->u.ubuf.offset == 0 && !b->u.ubuf.hasDynamicOffset));
+
             bd.ubuf.id = bufD->m_id;
             bd.ubuf.generation = bufD->generation;
             // Dynamic ubuf offsets are not considered here, those are baked in
@@ -2786,6 +2793,7 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
                                                     D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT, \
                                                     #stagePrefixU " cbuf"); \
             if (count) { \
+                if (!doNotUseConstantBufferOffsetting) { \
                 if (!dynOfsPairCount) { \
                     context->stagePrefixU##SetConstantBuffers1(batches.ubufs.batches[i].startBinding, \
                                                    count, \
@@ -2801,6 +2809,12 @@ static inline uint clampedResourceCount(uint startSlot, int countSlots, uint max
                                                    batches.ubufs.batches[i].resources.constData(), \
                                                    offsets, \
                                                    batches.ubufsizes.batches[i].resources.constData()); \
+                } \
+                } else { \
+                    Q_ASSERT(dynOfsPairCount == 0); \
+                    context->stagePrefixU##SetConstantBuffers(batches.ubufs.batches[i].startBinding, \
+                                                              count, \
+                                                              batches.ubufs.batches[i].resources.constData()); \
                 } \
             } \
         } \
@@ -5486,7 +5500,9 @@ bool QD3D11SwapChain::createOrResize()
         desc.BufferCount = BUFFER_COUNT;
         desc.Flags = swapChainFlags;
         desc.Scaling = rhiD->useLegacySwapchainModel ? DXGI_SCALING_STRETCH : DXGI_SCALING_NONE;
-        desc.SwapEffect = rhiD->useLegacySwapchainModel ? DXGI_SWAP_EFFECT_DISCARD : DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        desc.SwapEffect = rhiD->useLegacySwapchainModel ? DXGI_SWAP_EFFECT_DISCARD
+                                                        : ((QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10) ? DXGI_SWAP_EFFECT_FLIP_DISCARD
+                                                                                                                                      : DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL);
         desc.Stereo = stereo;
 
         if (dcompVisual) {

@@ -67,7 +67,10 @@ private:
 QDirect3D9Handle::QDirect3D9Handle()
 {
 #ifndef QT_NO_OPENGL
-    m_direct3D9 = Direct3DCreate9(D3D_SDK_VERSION);
+    QSystemLibrary d3d9dll(QStringLiteral("d3d9"));
+    typedef IDirect3D9* (*Direct3DCreate9Func)(UINT);
+    if (const auto direct3DCreate9 = (Direct3DCreate9Func)(d3d9dll.resolve("Direct3DCreate9")))
+        m_direct3D9 = direct3DCreate9(D3D_SDK_VERSION);
 #endif
 }
 

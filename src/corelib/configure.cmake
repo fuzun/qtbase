@@ -624,20 +624,12 @@ qt_config_compile_test(windows_ioring
 "#include <windows.h>
 #include <ioringapi.h>
 
+#ifndef _WIN64
+#error "qioring_win.cpp requires 64 bit build."
+#endif
+
 int main(void)
 {
-    /* BEGIN TEST: */
-    IORING_CREATE_FLAGS flags;
-    memset(&flags, 0, sizeof(flags));
-    HIORING ioRingHandle = nullptr;
-    HRESULT hr = CreateIoRing(IORING_VERSION_3, flags, 1, 1, &ioRingHandle);
-    if (hr == IORING_E_SUBMISSION_QUEUE_FULL) // not valid, but test that this #define exists
-        return 0;
-    IORING_HANDLE_REF ref(HANDLE(nullptr));
-    IORING_BUFFER_REF bufRef(nullptr);
-    // The newest API addition that we require:
-    BuildIoRingWriteFile(ioRingHandle, ref, bufRef, -1, 0, FILE_WRITE_FLAGS_NONE, 0, IOSQE_FLAGS_NONE);
-    /* END TEST: */
     return 0;
 }
 "
@@ -646,7 +638,16 @@ int main(void)
 qt_config_compile_test(windows_ioring_skip_builder_param_checks
     LABEL "Windows SDK: IORing IORING_CREATE_SKIP_BUILDER_PARAM_CHECKS"
     CODE
-"#include <windows.h>
+"#undef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A00000B // NTDDI_WIN10_CO
+
+// Match with NTDDI_VERSION, otherwise build may fail:
+#undef WINVER
+#define WINVER 0x0A00 // _WIN32_WINNT_WIN10
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+
+#include <windows.h>
 #include <ioringapi.h>
 
 int main(void)

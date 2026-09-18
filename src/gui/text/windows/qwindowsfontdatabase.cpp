@@ -20,6 +20,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/private/qduplicatetracker_p.h>
 #include <QtCore/private/qwinregistry_p.h>
+#include <QtCore/qoperatingsystemversion.h>
 
 #include <wchar.h>
 
@@ -1213,7 +1214,7 @@ QFontEngine *QWindowsFontDatabase::createEngine(const QFontDef &request, const Q
     }
 
 #if QT_CONFIG(directwrite) && QT_CONFIG(direct2d)
-    if (data->directWriteFactory != nullptr) {
+    if ((QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows10) && (data->directWriteFactory != nullptr)) {
         const QString fam = QString::fromWCharArray(lf.lfFaceName);
         const QString nameSubstitute = QWindowsFontEngineDirectWrite::fontNameSubstitute(fam);
         if (nameSubstitute != fam) {

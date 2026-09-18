@@ -7,6 +7,7 @@
 
 #include <QtCore/QThreadStorage>
 #include <QtCore/QtEndian>
+#include <QtCore/private/qsystemlibrary_p.h>
 
 #if QT_CONFIG(directwrite)
 #  if QT_CONFIG(directwrite3)
@@ -774,7 +775,18 @@ QFont QWindowsFontDatabaseBase::systemDefaultFont()
     // Qt 6: Obtain default GUI font (typically "Segoe UI, 9pt", see QTBUG-58610)
     NONCLIENTMETRICS ncm = {};
     ncm.cbSize = sizeof(ncm);
-    SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0, defaultVerticalDPI());
+
+    typedef BOOL (*SystemParametersInfoForDpiCompat)(UINT, UINT, PVOID, UINT, UINT);
+    static SystemParametersInfoForDpiCompat systemParametersInfoForDpi = []() {
+        QSystemLibrary user32dll(QLatin1String("user32"));
+        return (SystemParametersInfoForDpiCompat)(user32dll.resolve("SystemParametersInfoForDpi"));
+    }();
+
+    if (systemParametersInfoForDpi)
+        systemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0, defaultVerticalDPI());
+    else
+        SystemParametersInfo(SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0);
+
     const QFont systemFont = QWindowsFontDatabase::LOGFONT_to_QFont(ncm.lfMessageFont);
     qCDebug(lcQpaFonts) << __FUNCTION__ << systemFont;
     return systemFont;
