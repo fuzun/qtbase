@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 // Qt-Security score:significant reason:default
 
+#undef NTDDI_VERSION
+#define NTDDI_VERSION 0xFFFFFFFF // Enable all existing and future ioring functionality
+
+// Match with NTDDI_VERSION (otherwise build may fail)
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0xFFFF
+#undef WINVER
+#define WINVER 0xFFFF
+
 #include "qioring_p.h"
 
 QT_REQUIRE_CONFIG(windows_ioring);
@@ -642,6 +651,9 @@ auto QIORing::prepareRequest(GenericRequestType &request) -> RequestPrepResult
         Q_UNREACHABLE_RETURN(RequestPrepResult::RequestCompleted);
         break;
     }
+#ifndef IORING_E_SUBMISSION_QUEUE_FULL
+#define IORING_E_SUBMISSION_QUEUE_FULL _HRESULT_TYPEDEF_(0x80460002) // https://github.com/mingw-w64/mingw-w64/commit/5356cf2974e5d67321423a4db89e7b14cf9fbd90
+#endif
     if (hr == IORING_E_SUBMISSION_QUEUE_FULL)
         return RequestPrepResult::QueueFull;
     if (FAILED(hr)) {

@@ -67,6 +67,7 @@
 QT_BEGIN_NAMESPACE
 
 #if defined(Q_OS_WIN)
+#include <QtCore/private/qsystemlibrary_p.h>
 
 QT_BEGIN_INCLUDE_NAMESPACE
 #include "qt_windows.h"
@@ -265,29 +266,42 @@ int QWindowsStylePrivate::pixelMetricFromSystemDp(QStyle::PixelMetric pm, const 
     // hardcode DPI to 1x 96 DPI.
     const int dpi = 96;
 
+    typedef int (WINAPI *GetSystemMetricsForDpiFunc)(int, UINT);
+    static GetSystemMetricsForDpiFunc getSystemMetricsForDpi = []() {
+        QSystemLibrary user32dll(QLatin1String("user32"));
+        return (GetSystemMetricsForDpiFunc)(user32dll.resolve("GetSystemMetricsForDpi"));
+    }();
+
+    typedef BOOL (WINAPI *SystemParametersInfoForDpiFunc)(UINT, UINT, PVOID, UINT, UINT);
+    static SystemParametersInfoForDpiFunc systemParametersInfoForDpi = []() {
+        QSystemLibrary user32dll(QLatin1String("user32"));
+        return (SystemParametersInfoForDpiFunc)(user32dll.resolve("SystemParametersInfoForDpi"));
+    }();
+
     switch (pm) {
     case QStyle::PM_DockWidgetFrameWidth:
-        return GetSystemMetricsForDpi(SM_CXFRAME, dpi);
+        return getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CXFRAME, dpi) : GetSystemMetrics(SM_CXFRAME);
 
     case QStyle::PM_TitleBarHeight: {
         const int resizeBorderThickness =
-            GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            (getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) : GetSystemMetrics(SM_CXSIZEFRAME)) +
+            (getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) : GetSystemMetrics(SM_CXPADDEDBORDER));
         if (widget && (widget->windowType() == Qt::Tool))
-            return GetSystemMetricsForDpi(SM_CYSMCAPTION, dpi) + resizeBorderThickness;
-        return GetSystemMetricsForDpi(SM_CYCAPTION, dpi) + resizeBorderThickness;
+            return (getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CYSMCAPTION, dpi) : GetSystemMetrics(SM_CYSMCAPTION)) + resizeBorderThickness;
+        return (getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CYCAPTION, dpi) : GetSystemMetrics(SM_CYCAPTION)) + resizeBorderThickness;
     }
 
     case QStyle::PM_ScrollBarExtent:
         {
             NONCLIENTMETRICS ncm;
             ncm.cbSize = sizeof(NONCLIENTMETRICS);
-            if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &ncm, 0, dpi))
+            if (systemParametersInfoForDpi ? systemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &ncm, 0, dpi) : SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &ncm, 0))
                 return qMax(ncm.iScrollHeight, ncm.iScrollWidth);
         }
         break;
 
     case  QStyle::PM_MdiSubWindowFrameWidth:
-        return GetSystemMetricsForDpi(SM_CYFRAME, dpi);
+        return getSystemMetricsForDpi ? getSystemMetricsForDpi(SM_CYFRAME, dpi) : GetSystemMetrics(SM_CYFRAME);
 
     default:
         break;

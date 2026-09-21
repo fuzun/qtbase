@@ -28,7 +28,12 @@
 #include <dxgi1_6.h>
 #include <dcomp.h>
 
-#include "D3D12MemAlloc.h"
+namespace D3D12MA {
+    struct Budget;
+    struct Statistics;
+    class Allocation;
+    class Allocator;
+}
 
 // ID3D12Device2 and ID3D12GraphicsCommandList1 and types and enums introduced
 // with those are hard requirements now. These should be declared in any
@@ -329,15 +334,7 @@ struct QD3D12Resource
         return pool->add({ resource, state, resource->GetDesc(), nullptr, nullptr, 0, false });
     }
 
-    void releaseResources()
-    {
-        if (owns) {
-            // order matters: resource first, then the allocation
-            resource->Release();
-            if (allocation)
-                allocation->Release();
-        }
-    }
+    void releaseResources();
 };
 
 struct QD3D12Pipeline

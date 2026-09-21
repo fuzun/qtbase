@@ -107,9 +107,12 @@ static inline QDpi deviceDPI(HDC hdc)
 
 static inline QDpi monitorDPI(HMONITOR hMonitor)
 {
+    if (!QWindowsContext::shcoredll.getDpiForMonitor)
+        return {0, 0}; // Fallback uses `GetDeviceCaps()`.
+
     UINT dpiX;
     UINT dpiY;
-    if (SUCCEEDED(GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
+    if (SUCCEEDED(QWindowsContext::shcoredll.getDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
         return QDpi(dpiX, dpiY);
     return {0, 0};
 }
@@ -804,6 +807,9 @@ QRect QWindowsScreen::virtualGeometry(const QPlatformScreen *screen) // cf QScre
 
 bool QWindowsScreen::setOrientationPreference(Qt::ScreenOrientation o)
 {
+    if (!QWindowsContext::user32dll.setDisplayAutoRotationPreferences)
+        return false;
+
     bool result = false;
     ORIENTATION_PREFERENCE orientationPreference = ORIENTATION_PREFERENCE_NONE;
     switch (o) {
@@ -822,7 +828,7 @@ bool QWindowsScreen::setOrientationPreference(Qt::ScreenOrientation o)
         orientationPreference = ORIENTATION_PREFERENCE_LANDSCAPE_FLIPPED;
         break;
     }
-    result = SetDisplayAutoRotationPreferences(orientationPreference);
+    result = QWindowsContext::user32dll.setDisplayAutoRotationPreferences(orientationPreference);
     return result;
 }
 
@@ -830,7 +836,7 @@ Qt::ScreenOrientation QWindowsScreen::orientationPreference()
 {
     Qt::ScreenOrientation result = Qt::PrimaryOrientation;
     ORIENTATION_PREFERENCE orientationPreference = ORIENTATION_PREFERENCE_NONE;
-    if (GetDisplayAutoRotationPreferences(&orientationPreference)) {
+    if (QWindowsContext::user32dll.getDisplayAutoRotationPreferences && QWindowsContext::user32dll.getDisplayAutoRotationPreferences(&orientationPreference)) {
         switch (orientationPreference) {
         case ORIENTATION_PREFERENCE_NONE:
             break;

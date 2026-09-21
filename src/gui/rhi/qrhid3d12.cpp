@@ -3,9 +3,11 @@
 // Qt-Security score:significant reason:default
 
 #include "qrhid3d12_p.h"
+#include "D3D12MemAlloc.h"
 #include <qmath.h>
 #include <QtCore/private/qsystemerror_p.h>
 #include <QtCore/qcryptographichash.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 #include <comdef.h>
 #include "qrhid3dhelpers_p.h"
 #include "cs_mipmap_p.h"
@@ -156,8 +158,24 @@ QT_BEGIN_NAMESPACE
     \variable QRhiD3D12CommandBufferNativeHandles::commandList
 */
 
+typedef HRESULT (WINAPI *D3D12SerializeVersionedRootSignatureFunc)(
+              const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *pRootSignature,
+              ID3DBlob                                  **ppBlob,
+              ID3DBlob                                  **ppErrorBlob
+);
+
 // https://learn.microsoft.com/en-us/windows/win32/direct3d12/hardware-feature-levels
 static const D3D_FEATURE_LEVEL MIN_FEATURE_LEVEL = D3D_FEATURE_LEVEL_11_0;
+
+void QD3D12Resource::releaseResources()
+{
+    if (owns) {
+        // order matters: resource first, then the allocation
+        resource->Release();
+        if (allocation)
+            allocation->Release();
+    }
+}
 
 QRhiD3D12::QRhiD3D12(QRhiD3D12InitParams *params, QRhiD3D12NativeHandles *importParams)
 {
@@ -242,20 +260,30 @@ bool QRhiD3D12::create(QRhi::Flags flags)
     UINT factoryFlags = 0;
     if (debugLayer)
         factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-    HRESULT hr = CreateDXGIFactory2(factoryFlags, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
-    if (FAILED(hr)) {
-        // retry without debug, if it was requested (to match D3D11 backend behavior)
-        if (debugLayer) {
+
+    HRESULT hr = E_FAIL;
+
+    if (debugLayer) {
+        typedef HRESULT (WINAPI *CreateDXGIFactory2FuncPtr)(UINT Flags, REFIID riid, void **ppFactory);
+        CreateDXGIFactory2FuncPtr createDXGIFactory2 = nullptr;
+        QSystemLibrary dxgilib(QLatin1String("dxgi"));
+        createDXGIFactory2 = reinterpret_cast<CreateDXGIFactory2FuncPtr>(dxgilib.resolve("CreateDXGIFactory2"));
+        if (createDXGIFactory2) {
+            hr = createDXGIFactory2(factoryFlags, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
+        }
+
+        if (FAILED(hr)) {
             qCDebug(QRHI_LOG_INFO, "Debug layer was requested but is not available. "
                                    "Attempting to create DXGIFactory2 without it.");
-            factoryFlags &= ~DXGI_CREATE_FACTORY_DEBUG;
-            hr = CreateDXGIFactory2(factoryFlags, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
-        }
-        if (SUCCEEDED(hr)) {
             debugLayer = false;
-        } else {
-            qWarning("CreateDXGIFactory2() failed to create DXGI factory: %s",
-                     qPrintable(QSystemError::windowsComString(hr)));
+        }
+    }
+
+    if (!debugLayer) {
+        hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
+        if (FAILED(hr)) {
+            qWarning("CreateDXGIFactory1() failed to create DXGI factory: %s",
+                qPrintable(QSystemError::windowsComString(hr)));
             return false;
         }
     }
@@ -276,7 +304,18 @@ bool QRhiD3D12::create(QRhi::Flags flags)
 
     if (debugLayer) {
         ID3D12Debug1 *debug = nullptr;
-        if (SUCCEEDED(D3D12GetDebugInterface(__uuidof(ID3D12Debug1), reinterpret_cast<void **>(&debug)))) {
+
+        QSystemLibrary d3d12lib(QStringLiteral("d3d12"));
+
+        typedef HRESULT (WINAPI *D3D12GetDebugInterfaceFunc)(
+            REFIID riid,
+            void   **ppvDebug
+        );
+        static const auto d3D12GetDebugInterface = reinterpret_cast<D3D12GetDebugInterfaceFunc>(d3d12lib.resolve("D3D12GetDebugInterface"));
+
+        if (!d3D12GetDebugInterface) {
+            qWarning("Can not enable D3D12 debug layer. Symbol D3D12GetDebugInterface is missing, is D3D12 installed properly?");
+        } else if (SUCCEEDED(d3D12GetDebugInterface(__uuidof(ID3D12Debug1), reinterpret_cast<void **>(&debug)))) {
             qCDebug(QRHI_LOG_INFO, "Enabling D3D12 debug layer");
             debug->EnableDebugLayer();
             debug->Release();
@@ -348,7 +387,23 @@ bool QRhiD3D12::create(QRhi::Flags flags)
         if (minimumFeatureLevel == 0)
             minimumFeatureLevel = MIN_FEATURE_LEVEL;
 
-        hr = D3D12CreateDevice(activeAdapter,
+        typedef HRESULT (WINAPI *D3D12CreateDeviceFunc)(
+            IUnknown                 *pAdapter,
+            D3D_FEATURE_LEVEL         MinimumFeatureLevel,
+            REFIID                    riid,
+            void                    **ppDevice
+        );
+        static const D3D12CreateDeviceFunc d3D12CreateDevice = []() {
+            QSystemLibrary d3d12lib(QStringLiteral("d3d12"));
+            return reinterpret_cast<D3D12CreateDeviceFunc>(d3d12lib.resolve("D3D12CreateDevice"));
+        }();
+
+        if (!d3D12CreateDevice) {
+            qWarning("Symbol D3D12CreateDevice could not be resolved, RhiD3D12 will not be available. Is DirectX 12 installed?");
+            return false;
+        }
+
+        hr = d3D12CreateDevice(activeAdapter,
                                minimumFeatureLevel,
                                __uuidof(ID3D12Device2),
                                reinterpret_cast<void **>(&dev));
@@ -744,7 +799,7 @@ QRhi::AdapterList QRhiD3D12::enumerateAdaptersBeforeCreate(QRhiNativeHandles *na
     }
 
     IDXGIFactory2 *dxgi = nullptr;
-    if (FAILED(CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgi))))
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgi))))
         return {};
 
     QRhi::AdapterList list;
@@ -3634,7 +3689,18 @@ bool QD3D12MipmapGenerator::buildPipeline()
     rsDesc.Desc_1_1.pStaticSamplers = &samplerDesc;
 
     ID3DBlob *signature = nullptr;
-    HRESULT hr = D3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
+
+    static const D3D12SerializeVersionedRootSignatureFunc d3D12SerializeVersionedRootSignature = []() {
+        QSystemLibrary d3d12lib(QStringLiteral("d3d12"));
+        return reinterpret_cast<D3D12SerializeVersionedRootSignatureFunc>(d3d12lib.resolve("D3D12SerializeVersionedRootSignature"));
+    }();
+    
+    if (!d3D12SerializeVersionedRootSignature) {
+        qWarning("Could not resolve D3D12SerializeVersionedRootSignature. Is D3D12 properly installed?");
+        return false;
+    }
+
+    HRESULT hr = d3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
     if (FAILED(hr)) {
         qWarning("Failed to serialize root signature: %s", qPrintable(QSystemError::windowsComString(hr)));
         return false;
@@ -3917,7 +3983,18 @@ bool QD3D12MipmapGenerator3D::buildPipeline()
     rsDesc.Desc_1_1.pStaticSamplers = &samplerDesc;
 
     ID3DBlob *signature = nullptr;
-    HRESULT hr = D3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
+
+    static const D3D12SerializeVersionedRootSignatureFunc d3D12SerializeVersionedRootSignature = []() {
+        QSystemLibrary d3d12lib(QStringLiteral("d3d12"));
+        return reinterpret_cast<D3D12SerializeVersionedRootSignatureFunc>(d3d12lib.resolve("D3D12SerializeVersionedRootSignature"));
+    }();
+    
+    if (!d3D12SerializeVersionedRootSignature) {
+        qWarning("Could not resolve D3D12SerializeVersionedRootSignature. Is D3D12 properly installed?");
+        return false;
+    }
+
+    HRESULT hr = d3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
     if (FAILED(hr)) {
         qWarning("Failed to serialize root signature: %s", qPrintable(QSystemError::windowsComString(hr)));
         return false;
@@ -6379,7 +6456,17 @@ QD3D12ObjectHandle QD3D12ShaderResourceBindings::createRootSignature(const QD3D1
     rsDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAGS(rsFlags);
 
     ID3DBlob *signature = nullptr;
-    HRESULT hr = D3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
+
+    static const D3D12SerializeVersionedRootSignatureFunc d3D12SerializeVersionedRootSignature = []() {
+        QSystemLibrary d3d12lib(QStringLiteral("d3d12"));
+        return reinterpret_cast<D3D12SerializeVersionedRootSignatureFunc>(d3d12lib.resolve("D3D12SerializeVersionedRootSignature"));
+    }();
+    
+    if (!d3D12SerializeVersionedRootSignature) {
+        qWarning("Could not resolve D3D12SerializeVersionedRootSignature. Is D3D12 properly installed?");
+        return {};
+    }
+    HRESULT hr = d3D12SerializeVersionedRootSignature(&rsDesc, &signature, nullptr);
     if (FAILED(hr)) {
         qWarning("Failed to serialize root signature: %s", qPrintable(QSystemError::windowsComString(hr)));
         return {};

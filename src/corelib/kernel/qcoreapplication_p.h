@@ -108,7 +108,7 @@ public:
     static QBasicAtomicPointer<void> theMainThreadId;
     static QThread *mainThread();
 
-    static void sendPostedEvents(QObject *receiver, int event_type, QThreadData *data);
+    static void sendPostedEvents(QObject *receiver, int event_type, QThreadData *data, qsizetype count = 0);
 
     static void checkReceiverThread(QObject *receiver);
     void cleanupThreadData();

@@ -39,9 +39,9 @@ bool QWindowsGuiEventDispatcher::processEvents(QEventLoop::ProcessEventsFlags fl
     return rc;
 }
 
-void QWindowsGuiEventDispatcher::sendPostedEvents()
+void QWindowsGuiEventDispatcher::sendPostedEvents(qsizetype count)
 {
-    QEventDispatcherWin32::sendPostedEvents();
+    QEventDispatcherWin32::sendPostedEvents(count);
     QWindowSystemInterface::sendWindowSystemEvents(m_flags);
 }
 

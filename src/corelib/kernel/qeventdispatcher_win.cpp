@@ -5,6 +5,8 @@
 
 #include "qeventdispatcher_win_p.h"
 
+#include <QtCore/qtenvironmentvariables.h>
+#include <optional>
 #include "qcoreapplication.h"
 #include <private/qsystemlibrary_p.h>
 #include "qoperatingsystemversion.h"
@@ -39,6 +41,8 @@ QT_BEGIN_NAMESPACE
 #  define WM_GESTURENOTIFY 0x011A
 #endif
 #endif // QT_NO_GESTURES
+
+#define POSTEDEVENTS_BATCH 32
 
 enum {
     WM_QT_SOCKETNOTIFIER = WM_USER,
@@ -207,7 +211,29 @@ LRESULT QT_WIN_CALLBACK qt_internal_proc(HWND hwnd, UINT message, WPARAM wp, LPA
         if (HIWORD(GetQueueStatus(mask)) == 0)
             q->sendPostedEvents();
         else
+        {
+            // Fair treatment for posted events,
+            // at least process some of the pending events:
+            static const auto postedEventsBatch = []() -> std::optional<int> {
+                bool ok;
+                const int batch = qEnvironmentVariableIntValue("QT_POSTEDEVENTS_BATCH", &ok);
+                if (ok) {
+                    if (batch >= 0)
+                        return batch;
+                    else
+                        return std::nullopt;
+                } else {
+                    return POSTEDEVENTS_BATCH;
+                }
+            }();
+
+            if (postedEventsBatch)
+                q->sendPostedEvents(*postedEventsBatch);
+
+            // We still need this, because there can be more than
+            // POSTEDEVENTS_BATCH posted events waiting to be processed:
             d->startPostedEventsTimer();
+        }
         return 0;
     } // switch (message)
 
@@ -371,7 +397,15 @@ void QEventDispatcherWin32Private::registerTimer(WinTimerInfo *t)
 
     if (!ok) {
         // user normal timers for (Very)CoarseTimers, or if no more multimedia timers available
-        ok = SetCoalescableTimer(internalHwnd, t->timerId, interval, nullptr, tolerance);
+
+        typedef UINT_PTR (WINAPI *SetCoalescableTimerCompat)(HWND, UINT_PTR, UINT, TIMERPROC, ULONG);
+        static SetCoalescableTimerCompat setCoalescableTimer = []() {
+            QSystemLibrary user32dll(QLatin1String("user32"));
+            return (SetCoalescableTimerCompat)(user32dll.resolve("SetCoalescableTimer"));
+        }();
+
+        if (setCoalescableTimer)
+            ok = setCoalescableTimer(internalHwnd, t->timerId, interval, nullptr, tolerance);
     }
     if (!ok)
         ok = SetTimer(internalHwnd, t->timerId, interval, nullptr);
@@ -912,18 +946,21 @@ bool QEventDispatcherWin32::event(QEvent *e)
     return QAbstractEventDispatcher::event(e);
 }
 
-void QEventDispatcherWin32::sendPostedEvents()
+void QEventDispatcherWin32::sendPostedEvents(qsizetype count)
 {
     Q_D(QEventDispatcherWin32);
 
-    if (d->sendPostedEventsTimerId != 0)
-        KillTimer(d->internalHwnd, d->sendPostedEventsTimerId);
-    d->sendPostedEventsTimerId = 0;
+    if (count == 0)
+    {
+        if (d->sendPostedEventsTimerId != 0)
+            KillTimer(d->internalHwnd, d->sendPostedEventsTimerId);
+        d->sendPostedEventsTimerId = 0;
 
-    // Allow posting WM_QT_SENDPOSTEDEVENTS message.
-    d->wakeUps.storeRelaxed(0);
+        // Allow posting WM_QT_SENDPOSTEDEVENTS message.
+        d->wakeUps.storeRelaxed(0);
+    }
 
-    QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData.loadRelaxed());
+    QCoreApplicationPrivate::sendPostedEvents(0, 0, d->threadData.loadRelaxed(), count);
 }
 
 HWND QEventDispatcherWin32::internalHwnd()
