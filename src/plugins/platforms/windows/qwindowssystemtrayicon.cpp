@@ -222,6 +222,9 @@ void QWindowsSystemTrayIcon::showMessage(const QString &title, const QString &me
     qStringToLimitedWCharArray(message, tnd.szInfo, 256);
     qStringToLimitedWCharArray(title, tnd.szInfoTitle, 64);
 
+    // No audio:
+    tnd.dwInfoFlags |= NIIF_NOSOUND;
+
     tnd.uID = q_uNOTIFYICONID;
 
     const auto size = icon.actualSize(QSize(256, 256));

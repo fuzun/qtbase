@@ -236,16 +236,16 @@ function(qt_internal_ensure_latest_win_nt_api)
         #if !defined(_WIN32_WINNT) && !defined(WINVER)
         #error "_WIN32_WINNT and WINVER are not defined"
         #endif
-        #if defined(_WIN32_WINNT) && (_WIN32_WINNT < 0x0A00)
+        #if defined(_WIN32_WINNT) && (_WIN32_WINNT < 0x0601)
         #error "_WIN32_WINNT version too low"
         #endif
-        #if defined(WINVER) && (WINVER < 0x0A00)
+        #if defined(WINVER) && (WINVER < 0x0601)
         #error "WINVER version too low"
         #endif
         int main() { return 0; }
-    ]=] HAVE_WIN10_WIN32_WINNT)
-    if(NOT HAVE_WIN10_WIN32_WINNT)
-        list(APPEND QT_PLATFORM_DEFINITIONS _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+    ]=] HAVE_WIN7_WIN32_WINNT)
+    if(NOT HAVE_WIN7_WIN32_WINNT)
+        list(APPEND QT_PLATFORM_DEFINITIONS _WIN32_WINNT=0x0601 WINVER=0x0601)
         set(QT_PLATFORM_DEFINITIONS ${QT_PLATFORM_DEFINITIONS}
             CACHE STRING "Qt platform specific pre-processor defines" FORCE)
     endif()

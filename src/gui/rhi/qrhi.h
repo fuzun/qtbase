@@ -2134,6 +2134,9 @@ protected:
 private:
     Q_DISABLE_COPY(QRhi)
     QRhiImplementation *d = nullptr;
+
+public:
+    QRhiImplementation* implementation() { return d; };
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QRhi::Flags)

@@ -60,6 +60,10 @@
 #    define GWL_HWNDPARENT (-8)
 #endif
 
+#ifndef WS_EX_NOREDIRECTIONBITMAP
+#define WS_EX_NOREDIRECTIONBITMAP 0x00200000L
+#endif
+
 QT_BEGIN_NAMESPACE
 
 using namespace Qt::StringLiterals;
@@ -72,6 +76,18 @@ enum {
 };
 
 Q_GUI_EXPORT HICON qt_pixmapToWinHICON(const QPixmap &);
+
+static UINT getSystemDpi()
+{
+    static UINT ret = []() {
+        HDC dc = GetDC(NULL);
+        int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+        ReleaseDC(NULL, dc);
+        return static_cast<UINT>(dpi);
+    }();
+
+    return ret;
+}
 
 static QByteArray debugWinStyle(DWORD style)
 {
@@ -529,8 +545,11 @@ static void setWindowOpacity(HWND hwnd, Qt::WindowFlags flags, bool hasAlpha, bo
     // The width of the padded border will always be 0 if DWM composition is
     // disabled, but since it will always be enabled and can't be programtically
     // disabled from Windows 8, we are safe to go.
-    return GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi)
-           + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    if (QWindowsContext::user32dll.getSystemMetricsForDpi)
+        return QWindowsContext::user32dll.getSystemMetricsForDpi(SM_CXSIZEFRAME, dpi)
+                + QWindowsContext::user32dll.getSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    else
+        return GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
 }
 
 /*!
@@ -540,11 +559,14 @@ static void setWindowOpacity(HWND hwnd, Qt::WindowFlags flags, bool hasAlpha, bo
 
 static QMargins invisibleMargins(QPoint screenPoint)
 {
+    if (!QWindowsContext::shcoredll.getDpiForMonitor)
+        return QMargins();
+
     POINT pt = {screenPoint.x(), screenPoint.y()};
     if (HMONITOR hMonitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) {
         UINT dpiX;
         UINT dpiY;
-        if (SUCCEEDED(GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY))) {
+        if (SUCCEEDED(QWindowsContext::shcoredll.getDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY))) {
             const int gap = getResizeBorderThickness(dpiX);
             return QMargins(gap, 0, gap, gap);
         }
@@ -554,7 +576,9 @@ static QMargins invisibleMargins(QPoint screenPoint)
 
 [[nodiscard]] static inline QMargins invisibleMargins(const HWND hwnd)
 {
-    const UINT dpi = GetDpiForWindow(hwnd);
+    if (!QWindowsContext::user32dll.getDpiForWindow)
+        return QMargins(); // Comment above says invisible margins only exist on Windows 10 onwards.
+    const UINT dpi = QWindowsContext::user32dll.getDpiForWindow(hwnd);
     const int gap = getResizeBorderThickness(dpi);
     return QMargins(gap, 0, gap, gap);
 }
@@ -881,7 +905,8 @@ static inline int getTitleBarHeight_sys(const UINT dpi)
 {
     // According to MS design manual, it should be 32px when DPI is 96.
     return getResizeBorderThickness(dpi) +
-           ::GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+           (QWindowsContext::user32dll.getSystemMetricsForDpi ? QWindowsContext::user32dll.getSystemMetricsForDpi(SM_CYCAPTION, dpi)
+                                                              : GetSystemMetrics(SM_CYCAPTION));
 }
 
 QWindowsWindowData
@@ -951,7 +976,8 @@ QWindowsWindowData
                                  context->frameWidth, context->frameHeight,
                                  parentHandle, nullptr, appinst, nullptr);
 
-    const UINT dpi = ::GetDpiForWindow(result.hwnd);
+    const UINT dpi = QWindowsContext::user32dll.getDpiForWindow ? QWindowsContext::user32dll.getDpiForWindow(result.hwnd)
+                                                                : getSystemDpi();
     const int titleBarHeight = getTitleBarHeight_sys(dpi);
     result.hwndTitlebar = CreateWindowEx(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
                                          classTitleBarNameUtf16, classTitleBarNameUtf16,
@@ -1119,7 +1145,14 @@ QMargins QWindowsGeometryHint::frame(const QWindow *w, DWORD style, DWORD exStyl
         return {};
     RECT rect = {0,0,0,0};
     style &= ~DWORD(WS_OVERLAPPED); // Not permitted, see docs.
-    if (AdjustWindowRectExForDpi(&rect, style, FALSE, exStyle, unsigned(qRound(dpi))) == FALSE) {
+
+    BOOL x;
+    if (QWindowsContext::user32dll.adjustWindowRectExForDpi)
+        x = QWindowsContext::user32dll.adjustWindowRectExForDpi(&rect, style, FALSE, exStyle, unsigned(qRound(dpi)));
+    else
+        x = AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+
+    if (x == FALSE) {
         qErrnoWarning("%s: AdjustWindowRectExForDpi failed", __FUNCTION__);
     }
     const QMargins result(qAbs(rect.left), qAbs(rect.top),
@@ -1680,7 +1713,10 @@ void QWindowsWindow::initialize()
         && creationContext->requestedGeometryIn != obtainedGeometry) {
         QWindowSystemInterface::handleGeometryChange<QWindowSystemInterface::SynchronousDelivery>(w, obtainedGeometry);
     }
-    QWindowsWindow::setSavedDpi(GetDpiForWindow(handle()));
+
+    const UINT dpi = QWindowsContext::user32dll.getDpiForWindow ? QWindowsContext::user32dll.getDpiForWindow(handle())
+                                                                : getSystemDpi();
+    QWindowsWindow::setSavedDpi(dpi);
 }
 
 QSurfaceFormat QWindowsWindow::format() const
@@ -2203,7 +2239,8 @@ void QWindowsWindow::handleDpiChanged(HWND hwnd, WPARAM wParam, LPARAM lParam)
 
 void QWindowsWindow::handleDpiChangedAfterParent(HWND hwnd)
 {
-    const UINT dpi = GetDpiForWindow(hwnd);
+    const UINT dpi = QWindowsContext::user32dll.getDpiForWindow ? QWindowsContext::user32dll.getDpiForWindow(hwnd)
+                                                                : getSystemDpi();
     const qreal scale = dpiRelativeScale(dpi);
     setSavedDpi(dpi);
 
@@ -3840,15 +3877,20 @@ void QWindowsWindow::setEnabled(bool enabled)
 
 static UINT primaryScreenDpi()
 {
+    if (!QWindowsContext::shcoredll.getDpiForMonitor)
+        return QWindowsContext::user32dll.getDpiForSystem ? QWindowsContext::user32dll.getDpiForSystem()
+                                                          : getSystemDpi();
+
     // The primary monitor is the one that has its origin at (0, 0).
     const POINT origin{0, 0};
     if (const HMONITOR monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY)) {
         UINT dpiX;
         UINT dpiY;
-        if (SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
+        if (SUCCEEDED(QWindowsContext::shcoredll.getDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)))
             return dpiX;
     }
-    return GetDpiForSystem();
+    return QWindowsContext::user32dll.getDpiForSystem ? QWindowsContext::user32dll.getDpiForSystem()
+                                                      : getSystemDpi();
 }
 
 static HICON createHIcon(const QIcon &icon, UINT dpi, int xSizeMetric, int ySizeMetric)
@@ -3861,8 +3903,10 @@ static HICON createHIcon(const QIcon &icon, UINT dpi, int xSizeMetric, int ySize
         // corresponding device pixel ratio rather than 1, so that QIcon can
         // pick a representation authored for fractional scale factors.
         const qreal dpr = qreal(dpi) / QWindowsScreen::baseDpi;
-        const QSize physicalSize(GetSystemMetricsForDpi(xSizeMetric, dpi),
-                                 GetSystemMetricsForDpi(ySizeMetric, dpi));
+        const QSize physicalSize(QWindowsContext::user32dll.getSystemMetricsForDpi ? QWindowsContext::user32dll.getSystemMetricsForDpi(xSizeMetric, dpi)
+                                                                                   : GetSystemMetrics(xSizeMetric),
+                                 QWindowsContext::user32dll.getSystemMetricsForDpi ? QWindowsContext::user32dll.getSystemMetricsForDpi(ySizeMetric, dpi)
+                                                                                   : GetSystemMetrics(ySizeMetric));
         const QPixmap pm = icon.pixmap(icon.actualSize(physicalSize / dpr), dpr);
         if (!pm.isNull())
             return qt_pixmapToWinHICON(pm);
@@ -3879,8 +3923,8 @@ void QWindowsWindow::setWindowIcon(const QIcon &icon)
         // monitor the window is shown on. Note: Do not use savedDpi() here, it is
         // initialized in initialize(), whereas setWindowIcon() is already called
         // from the constructor.
-        const UINT windowDpi = GetDpiForWindow(m_data.hwnd);
-        const UINT titleBarDpi = windowDpi ? windowDpi : UINT(QWindowsScreen::baseDpi);
+        const UINT windowDpi = QWindowsContext::user32dll.getDpiForWindow ? QWindowsContext::user32dll.getDpiForWindow(m_data.hwnd) : 0;
+        const UINT titleBarDpi = windowDpi ? windowDpi : getSystemDpi();
         m_iconSmall = createHIcon(icon, titleBarDpi, SM_CXSMICON, SM_CYSMICON);
 
         // The big icon is used by the task bar and the Alt+Tab dialog. The task bar

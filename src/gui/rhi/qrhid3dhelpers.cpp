@@ -26,17 +26,36 @@ pD3DCompile resolveD3DCompile()
 
 IDCompositionDevice *createDirectCompositionDevice()
 {
-    QSystemLibrary dcomplib(QStringLiteral("dcomp"));
     typedef HRESULT (__stdcall *DCompositionCreateDeviceFuncPtr)(
         _In_opt_ IDXGIDevice *dxgiDevice,
         _In_ REFIID iid,
         _Outptr_ void **dcompositionDevice);
-    DCompositionCreateDeviceFuncPtr func = reinterpret_cast<DCompositionCreateDeviceFuncPtr>(
-        dcomplib.resolve("DCompositionCreateDevice"));
-    if (!func) {
-        qWarning("Unable to resolve DCompositionCreateDevice, perhaps dcomp.dll is missing?");
+
+    static const auto func = []() {
+        QSystemLibrary dcomplib(QStringLiteral("dcomp"));
+
+        DCompositionCreateDeviceFuncPtr func = reinterpret_cast<DCompositionCreateDeviceFuncPtr>(dcomplib.resolve("DCompositionCreateDevice3"));
+
+        if (!func) {
+            qDebug("Could not resolve DCompositionCreateDevice3, dcomp.dll is missing or old. Trying DCompositionCreateDevice2...");
+            func = reinterpret_cast<DCompositionCreateDeviceFuncPtr>(dcomplib.resolve("DCompositionCreateDevice2"));
+        }
+
+        if (!func) {
+            qDebug("Could not resolve DCompositionCreateDevice2, dcomp.dll is missing or old. Trying DCompositionCreateDevice...");
+            func = reinterpret_cast<DCompositionCreateDeviceFuncPtr>(dcomplib.resolve("DCompositionCreateDevice"));
+        }
+
+        if (!func) {
+            qDebug("Unable to resolve DCompositionCreateDevice, perhaps dcomp.dll is missing?");
+        }
+
+        return func;
+    }();
+
+    if (!func)
         return nullptr;
-    }
+
     IDCompositionDevice *device = nullptr;
     HRESULT hr = func(nullptr, __uuidof(IDCompositionDevice), reinterpret_cast<void **>(&device));
     if (FAILED(hr)) {
