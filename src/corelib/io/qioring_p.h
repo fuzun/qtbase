@@ -32,7 +32,7 @@ struct io_uring_cqe;
 #elif defined(Q_OS_WIN)
 #  include <QtCore/qwineventnotifier.h>
 #  include <qt_windows.h>
-#  include <ioringapi.h>
+// Do not include <ioringapi.h> (provides ioring functionality depending on NTDDI version) or <windows.h> (provides enums <ioringapi.h> uses depending on NTDDI version) here.
 #endif
 
 #include <algorithm>
@@ -236,7 +236,7 @@ private:
     }
 
     std::optional<QWinEventNotifier> notifier;
-    HIORING ioRingHandle = nullptr;
+    struct HIORING__* ioRingHandle = nullptr;
     HANDLE eventHandle = INVALID_HANDLE_VALUE;
     const QtPrivate::IORingApiTable *apiTable;
 

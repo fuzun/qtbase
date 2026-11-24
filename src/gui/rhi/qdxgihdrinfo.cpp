@@ -10,9 +10,9 @@ QT_BEGIN_NAMESPACE
 
 QDxgiHdrInfo::QDxgiHdrInfo()
 {
-    HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&m_factory));
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&m_factory));
     if (FAILED(hr)) {
-        qWarning("QDxgiHdrInfo: CreateDXGIFactory2 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
+        qWarning("QDxgiHdrInfo: CreateDXGIFactory1 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
         return;
     }
 
@@ -24,9 +24,9 @@ QDxgiHdrInfo::QDxgiHdrInfo()
 
 QDxgiHdrInfo::QDxgiHdrInfo(LUID luid)
 {
-    HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&m_factory));
+    HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&m_factory));
     if (FAILED(hr)) {
-        qWarning("QDxgiHdrInfo: CreateDXGIFactory2 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
+        qWarning("QDxgiHdrInfo: CreateDXGIFactory1 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
         return;
     }
 

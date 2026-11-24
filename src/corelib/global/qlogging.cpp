@@ -92,6 +92,7 @@ extern char *__progname;
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <processthreadsapi.h>
+#include <QtCore/private/qsystemlibrary_p.h>
 #endif
 
 QT_BEGIN_NAMESPACE
@@ -223,8 +224,17 @@ static bool qt_append_thread_name_to(QString &message)
 #elif defined(Q_OS_WIN)
 static bool qt_append_thread_name_to(QString &message)
 {
+    typedef HRESULT (WINAPI *GetThreadDescriptionFunc)(HANDLE, PWSTR*);
+    static GetThreadDescriptionFunc getThreadDescription = []() {
+        QSystemLibrary kernel32(QLatin1String("kernel32"));
+        return (GetThreadDescriptionFunc)(kernel32.resolve("GetThreadDescription"));
+    }();
+
+    if (!getThreadDescription)
+        return false;
+
     PWSTR description = nullptr;
-    HRESULT hr = GetThreadDescription(GetCurrentThread(), &description);
+    HRESULT hr = getThreadDescription(GetCurrentThread(), &description);
     std::unique_ptr<WCHAR, decltype(&LocalFree)> descriptionOwner(description, &LocalFree);
     if (SUCCEEDED(hr)) {
         QStringView threadName(description);

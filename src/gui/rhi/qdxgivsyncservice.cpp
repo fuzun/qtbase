@@ -10,6 +10,7 @@
 #include <QLoggingCategory>
 #include <QScreen>
 #include <QVarLengthArray>
+#include <QOperatingSystemVersion>
 #include <QtCore/private/qsystemerror_p.h>
 
 QT_BEGIN_NAMESPACE
@@ -97,7 +98,10 @@ QDxgiVSyncService::QDxgiVSyncService()
 {
     qCDebug(lcQpaScreenUpdates) << "New QDxgiVSyncService" << this;
 
-    disableService = qEnvironmentVariableIntValue("QT_D3D_NO_VBLANK_THREAD");
+    // QDxgiVSyncService causes major stuttering on Windows 7, so it
+    // is opt-in unlike opt-out on Windows >= 8.
+    disableService = (QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows8) ? qEnvironmentVariableIntValue("QT_D3D_NO_VBLANK_THREAD")
+                                                                                               : !qEnvironmentVariableIntValue("QT_D3D_VBLANK_THREAD");
     if (disableService) {
         qCDebug(lcQpaScreenUpdates) << "QDxgiVSyncService disabled by environment";
         return;
@@ -187,10 +191,10 @@ void QDxgiVSyncService::refAdapter(LUID luid)
         return;
 
     if (!dxgiFactory) {
-        HRESULT hr = CreateDXGIFactory2(0, __uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
+        HRESULT hr = CreateDXGIFactory1(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory));
         if (FAILED(hr)) {
             disableService = true;
-            qWarning("QDxgiVSyncService: CreateDXGIFactory2 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
+            qWarning("QDxgiVSyncService: CreateDXGIFactory1 failed: %s", qPrintable(QSystemError::windowsComString(hr)));
             return;
         }
         if (!cleanupRegistered) {

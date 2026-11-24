@@ -78,10 +78,7 @@ qt_internal_add_plugin(QWindowsDirect2DIntegrationPlugin
         winmm
         winspool
         wtsapi32
-        shcore
         comdlg32
-        d3d9
-        runtimeobject
         mscms
 )
 
@@ -139,6 +136,8 @@ qt_internal_extend_target(QWindowsDirect2DIntegrationPlugin CONDITION QT_FEATURE
 qt_internal_extend_target(QWindowsDirect2DIntegrationPlugin CONDITION QT_FEATURE_clipboard AND QT_FEATURE_draganddrop
     SOURCES
         ../windows/qwindowsdrag.cpp ../windows/qwindowsdrag.h
+    NO_PCH_SOURCES
+        ../windows/qwindowsdrag.cpp
 )
 
 qt_internal_extend_target(QWindowsDirect2DIntegrationPlugin CONDITION QT_FEATURE_tabletevent
